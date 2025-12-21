@@ -1,0 +1,9 @@
+[project]
+name = "othello-neural-dataset-engine"
+version = "0.1.0"
+description = "A high-fidelity Othello implementation and dataset generator for training neural networks with move-by-move state snapshots and JSON export."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "flask>=3.1.2",
+]
