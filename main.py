@@ -204,26 +204,31 @@ def move():
         data = request.json or {}
         r, c = data.get('row', -99), data.get('col', -99)
 
-        # 1. Check Bounds & Game Over Status
+        # 1. Bounds check and Game Over check
         if (0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE) and not game_state['game_over']:
             
-            # 2. NEW: Check if move is valid according to Othello rules
+            # 2. Server-side validation
             if is_valid_move(game_state['board'], r, c, game_state['current_player']):
                 
+                # Snapshot for history
                 board_before = [row[:] for row in game_state['board']]
+                current_p = game_state['current_player']
                 
-                # Receive flipped coordinates
-                new_board, flipped = apply_move(game_state['board'], r, c, game_state['current_player'])
+                # Apply the move
+                new_board, flipped = apply_move(game_state['board'], r, c, current_p)
                 
+                # Update main state
                 game_state['board'] = new_board
                 game_state['last_move'] = [r, c]
                 game_state['last_flipped'] = flipped
 
-                opponent = Player.WHITE if game_state['current_player'] == Player.BLACK else Player.BLACK
+                # Determine next player and game status
+                opponent = Player.WHITE if current_p == Player.BLACK else Player.BLACK
                 opponent_moves = get_valid_moves(game_state['board'], opponent)
                 
+                # Record to history (Using the already calculated opponent_moves)
                 game_state['history'].append({
-                    "player": game_state['current_player'],
+                    "player": current_p,
                     "row": r, "col": c,
                     "timestamp": time.time(),
                     "boardBefore": board_before,
@@ -233,13 +238,13 @@ def move():
                     "last_flipped": flipped    
                 })
 
+                # Turn management
                 if opponent_moves:
                     game_state['current_player'] = opponent
                 else:
-                    if not get_valid_moves(game_state['board'], game_state['current_player']):
+                    # If opponent has no moves, check if current player has moves (double skip)
+                    if not get_valid_moves(game_state['board'], current_p):
                         game_state['game_over'] = True
-            
-            # log an "Invalid Move Attempt"
             else:
                 print(f"Invalid move attempted at {r}, {c}")
 
@@ -278,23 +283,6 @@ def undo():
         game_state['game_over'] = False
     return jsonify(get_response_data())
 
-def get_response_data():
-    """Build a JSON-serializable snapshot of the current `game_state`.
-
-    Returns a dictionary ready for `jsonify` containing board, player,
-    valid moves, history, scores and some convenience fields used by the UI.
-    """
-    return {
-        "board": serialize_board(game_state['board']),
-        "current_player": game_state['current_player'].value,
-        "valid_moves": get_valid_moves(game_state['board'], game_state['current_player']),
-        "history": serialize_history(game_state['history']),
-        "scores": get_scores(game_state['board']),
-        "game_over": game_state['game_over'],
-        "last_move": game_state['last_move'],
-        "last_flipped": game_state['last_flipped']
-    }
-
 # --- Updated Global State Initialization ---
 def get_initial_state():
     """Return a fresh initial `game_state` dictionary.
@@ -325,14 +313,8 @@ def reset():
     # After resetting, we return the fresh state directly to the UI
     return jsonify(get_response_data())
 
-# --- Updated Response Helper ---
 def get_response_data():
-    """Compatibility wrapper returning a safe snapshot of `game_state`.
-
-    This secondary definition uses `.get()` to avoid KeyError when older
-    consumers or partial states are present; it mirrors the primary
-    `get_response_data` implementation but is defensive.
-    """
+    """Build a JSON-serializable snapshot of the current game state."""
     return {
         "board": serialize_board(game_state['board']),
         "current_player": game_state['current_player'].value,
@@ -340,10 +322,9 @@ def get_response_data():
         "history": serialize_history(game_state['history']),
         "scores": get_scores(game_state['board']),
         "game_over": game_state['game_over'],
-        "last_move": game_state.get('last_move'), # Use .get() for safety
-        "last_flipped": game_state.get('last_flipped', []) # Use .get() for safety
+        "last_move": game_state.get('last_move'),
+        "last_flipped": game_state.get('last_flipped', [])
     }
-
 
 if __name__ == '__main__':
     print("--- OTHELLO PRO SERVER ONLINE ---")
