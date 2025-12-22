@@ -9,6 +9,7 @@ and small helpers to serialize internal state for JSON responses.
 
 from flask import Flask, render_template, jsonify, request
 import time
+import random  #
 from enum import Enum
 
 app = Flask(__name__)
@@ -127,7 +128,7 @@ def apply_move(board, row, col, player):
     opponent = Player.WHITE if player == Player.BLACK else Player.BLACK
     directions = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
     
-    flipped_coords = [] # NEW: Track which pieces were flipped
+    flipped_coords = []
     for dr, dc in directions:
         r, c = row + dr, col + dc
         to_flip = []
@@ -137,7 +138,7 @@ def apply_move(board, row, col, player):
             elif new_board[r][c] == player:
                 for fr, fc in to_flip:
                     new_board[fr][fc] = player
-                    flipped_coords.append([fr, fc]) # Record the flip
+                    flipped_coords.append([fr, fc])
                 break
             else:
                 break
@@ -180,76 +181,114 @@ def serialize_history(history):
         for move in history
     ]
 
-game_state = {
-    "board": create_initial_board(),
-    "current_player": Player.BLACK,
-    "history": [],
-    "game_over": False,
-    "last_move": None,      # NEW: [r, c]
-    "last_flipped": []      # NEW: [[r, c], ...]
-}
+# --- Global State ---
+def get_initial_state():
+    return {
+        "board": create_initial_board(),
+        "current_player": Player.BLACK,
+        "history": [],
+        "game_over": False,
+        "last_move": None,
+        "last_flipped": []
+    }
+
+game_state = get_initial_state()
+
+# --- Core Game Logic Helper ---
+def execute_move_logic(r, c):
+    """Executes a move at (r, c) for the current player if valid.
+    
+    Returns:
+        bool: True if move was executed, False if invalid or game over.
+    """
+    global game_state
+    
+    if game_state['game_over']:
+        return False
+
+    # Validation
+    if not (0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE):
+        return False
+        
+    current_p = game_state['current_player']
+    if not is_valid_move(game_state['board'], r, c, current_p):
+        return False
+
+    # Snapshot for history
+    board_before = [row[:] for row in game_state['board']]
+    
+    # Apply the move
+    new_board, flipped = apply_move(game_state['board'], r, c, current_p)
+    
+    # Update main state
+    game_state['board'] = new_board
+    game_state['last_move'] = [r, c]
+    game_state['last_flipped'] = flipped
+
+    # Determine next player and game status
+    opponent = Player.WHITE if current_p == Player.BLACK else Player.BLACK
+    opponent_moves = get_valid_moves(game_state['board'], opponent)
+    
+    # Record to history
+    game_state['history'].append({
+        "player": current_p,
+        "row": r, "col": c,
+        "timestamp": time.time(),
+        "boardBefore": board_before,
+        "scoreAfter": get_scores(game_state['board']),
+        "nextMovesCount": len(opponent_moves),
+        "last_move": [r, c],       
+        "last_flipped": flipped    
+    })
+
+    # Turn management
+    if opponent_moves:
+        game_state['current_player'] = opponent
+    else:
+        # If opponent has no moves, check if current player has moves (double skip)
+        if not get_valid_moves(game_state['board'], current_p):
+            game_state['game_over'] = True
+            
+    return True
+
+# --- Routes ---
 
 @app.route('/')
 def index():
-    """Serve the main UI page.
-
-    Returns the rendered `index.html` template consumed by the front-end.
-    """
     return render_template('index.html')
 
 @app.route('/move', methods=['POST'])
 def move():
-    global game_state
     try:
         data = request.json or {}
         r, c = data.get('row', -99), data.get('col', -99)
-
-        # 1. Bounds check and Game Over check
-        if (0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE) and not game_state['game_over']:
-            
-            # 2. Server-side validation
-            if is_valid_move(game_state['board'], r, c, game_state['current_player']):
-                
-                # Snapshot for history
-                board_before = [row[:] for row in game_state['board']]
-                current_p = game_state['current_player']
-                
-                # Apply the move
-                new_board, flipped = apply_move(game_state['board'], r, c, current_p)
-                
-                # Update main state
-                game_state['board'] = new_board
-                game_state['last_move'] = [r, c]
-                game_state['last_flipped'] = flipped
-
-                # Determine next player and game status
-                opponent = Player.WHITE if current_p == Player.BLACK else Player.BLACK
-                opponent_moves = get_valid_moves(game_state['board'], opponent)
-                
-                # Record to history (Using the already calculated opponent_moves)
-                game_state['history'].append({
-                    "player": current_p,
-                    "row": r, "col": c,
-                    "timestamp": time.time(),
-                    "boardBefore": board_before,
-                    "scoreAfter": get_scores(game_state['board']),
-                    "nextMovesCount": len(opponent_moves),
-                    "last_move": [r, c],       
-                    "last_flipped": flipped    
-                })
-
-                # Turn management
-                if opponent_moves:
-                    game_state['current_player'] = opponent
-                else:
-                    # If opponent has no moves, check if current player has moves (double skip)
-                    if not get_valid_moves(game_state['board'], current_p):
-                        game_state['game_over'] = True
-            else:
-                print(f"Invalid move attempted at {r}, {c}")
+        
+        success = execute_move_logic(r, c)
+        if not success:
+            print(f"Invalid move attempted at {r}, {c}")
 
         return jsonify(get_response_data())
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/bot-move', methods=['POST'])
+def bot_move():
+    """Calculates and executes a random valid move for the current player."""
+    try:
+        if game_state['game_over']:
+             return jsonify(get_response_data())
+
+        current_p = game_state['current_player']
+        valid_moves = get_valid_moves(game_state['board'], current_p)
+        
+        if valid_moves:
+            # AI LOGIC: Random Choice
+            move = random.choice(valid_moves)
+            execute_move_logic(move[0], move[1])
+        
+        return jsonify(get_response_data())
+    except Exception as e:
+        print(e)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/undo', methods=['POST'])
@@ -265,42 +304,19 @@ def undo():
         game_state['history'].pop()
         if game_state['history']:
             prev = game_state['history'][-1]
-            # Since boardBefore is a snapshot of the board BEFORE that move,
-            # we must reconstruct the board state. Simplest is to just reset 
-            # highlights or restore from history properly.
             game_state['board'] = apply_move(prev['boardBefore'], prev['row'], prev['col'], prev['player'])[0]
             game_state['last_move'] = prev['last_move']
             game_state['last_flipped'] = prev['last_flipped']
             game_state['current_player'] = Player.WHITE if prev['player'] == Player.BLACK else Player.BLACK
-            # Check if current player actually has moves, otherwise it would have stayed on prev player
+            
+            # Re-check turn logic in case of skips
             if not get_valid_moves(game_state['board'], game_state['current_player']):
                 game_state['current_player'] = prev['player']
         else:
-            game_state['board'] = create_initial_board()
-            game_state['last_move'] = None
-            game_state['last_flipped'] = []
-            game_state['current_player'] = Player.BLACK
+            game_state = get_initial_state()
         game_state['game_over'] = False
     return jsonify(get_response_data())
 
-# --- Updated Global State Initialization ---
-def get_initial_state():
-    """Return a fresh initial `game_state` dictionary.
-
-    Useful for resetting the engine or initializing at startup.
-    """
-    return {
-        "board": create_initial_board(),
-        "current_player": Player.BLACK,
-        "history": [],
-        "game_over": False,
-        "last_move": None,      # Ensure this is explicitly initialized
-        "last_flipped": []      # Ensure this is explicitly initialized
-    }
-
-game_state = get_initial_state()
-
-# --- Updated Reset Route ---
 @app.route('/reset', methods=['POST'])
 def reset():
     global game_state
