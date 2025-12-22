@@ -78,26 +78,6 @@ def apply_move(board, row, col, player):
             c += dc
     return new_board, flipped_coords
 
-def oldxxx_apply_move(board, row, col, player):
-    new_board = [row[:] for row in board]
-    new_board[row][col] = player
-    opponent = Player.WHITE if player == Player.BLACK else Player.BLACK
-    directions = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
-    for dr, dc in directions:
-        r, c = row + dr, col + dc
-        to_flip = []
-        while 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE:
-            if new_board[r][c] == opponent:
-                to_flip.append((r, c))
-            elif new_board[r][c] == player:
-                for fr, fc in to_flip:
-                    new_board[fr][fc] = player
-                break
-            else:
-                break
-            r += dr
-            c += dc
-    return new_board
 
 def serialize_board(board):
     return [[cell.value for cell in row] for row in board]
@@ -127,7 +107,7 @@ game_state = {
 
 @app.route('/')
 def index():
-    return render_template('index_v5.html')
+    return render_template('index.html')
 
 @app.route('/move', methods=['POST'])
 def move():
@@ -136,35 +116,44 @@ def move():
         data = request.json or {}
         r, c = data.get('row', -99), data.get('col', -99)
 
+        # 1. Check Bounds & Game Over Status
         if (0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE) and not game_state['game_over']:
-            board_before = [row[:] for row in game_state['board']]
             
-            # UPDATED: Receive flipped coordinates
-            new_board, flipped = apply_move(game_state['board'], r, c, game_state['current_player'])
-            
-            game_state['board'] = new_board
-            game_state['last_move'] = [r, c]
-            game_state['last_flipped'] = flipped
+            # 2. NEW: Check if move is valid according to Othello rules
+            if is_valid_move(game_state['board'], r, c, game_state['current_player']):
+                
+                board_before = [row[:] for row in game_state['board']]
+                
+                # Receive flipped coordinates
+                new_board, flipped = apply_move(game_state['board'], r, c, game_state['current_player'])
+                
+                game_state['board'] = new_board
+                game_state['last_move'] = [r, c]
+                game_state['last_flipped'] = flipped
 
-            opponent = Player.WHITE if game_state['current_player'] == Player.BLACK else Player.BLACK
-            opponent_moves = get_valid_moves(game_state['board'], opponent)
-            
-            game_state['history'].append({
-                "player": game_state['current_player'],
-                "row": r, "col": c,
-                "timestamp": time.time(),
-                "boardBefore": board_before,
-                "scoreAfter": get_scores(game_state['board']),
-                "nextMovesCount": len(opponent_moves),
-                "last_move": [r, c],       # Save for undo
-                "last_flipped": flipped    # Save for undo
-            })
+                opponent = Player.WHITE if game_state['current_player'] == Player.BLACK else Player.BLACK
+                opponent_moves = get_valid_moves(game_state['board'], opponent)
+                
+                game_state['history'].append({
+                    "player": game_state['current_player'],
+                    "row": r, "col": c,
+                    "timestamp": time.time(),
+                    "boardBefore": board_before,
+                    "scoreAfter": get_scores(game_state['board']),
+                    "nextMovesCount": len(opponent_moves),
+                    "last_move": [r, c],       
+                    "last_flipped": flipped    
+                })
 
-            if opponent_moves:
-                game_state['current_player'] = opponent
+                if opponent_moves:
+                    game_state['current_player'] = opponent
+                else:
+                    if not get_valid_moves(game_state['board'], game_state['current_player']):
+                        game_state['game_over'] = True
+            
+            # log an "Invalid Move Attempt"
             else:
-                if not get_valid_moves(game_state['board'], game_state['current_player']):
-                    game_state['game_over'] = True
+                print(f"Invalid move attempted at {r}, {c}")
 
         return jsonify(get_response_data())
     except Exception as e:
