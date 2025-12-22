@@ -1,3 +1,12 @@
+"""Simple Othello game engine HTTP server.
+
+This module provides a lightweight Flask-based API for an Othello/Reversi
+engine used by the front-end UI in `templates/index.html`. It exposes routes
+to query the board, make moves, undo, and reset the game. Utility functions
+implement the core game logic (valid move detection, applying moves, scoring)
+and small helpers to serialize internal state for JSON responses.
+"""
+
 from flask import Flask, render_template, jsonify, request
 import time
 from enum import Enum
@@ -10,8 +19,18 @@ class Player(Enum):
     BLACK = "BLACK"
     WHITE = "WHITE"
     NONE = "NONE"
+    """Enumeration of possible board cell states.
+
+    - `BLACK` and `WHITE` represent player stones.
+    - `NONE` represents an empty board cell.
+    """
 
 def create_initial_board():
+    """Create and return the standard 8x8 Othello starting board.
+
+    Returns:
+        list[list[Player]]: A 2D list representing the initial board state.
+    """
     board = [[Player.NONE for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
     mid = BOARD_SIZE // 2
     board[mid-1][mid-1] = Player.WHITE
@@ -21,11 +40,28 @@ def create_initial_board():
     return board
 
 def get_scores(board):
+    """Count stones for each player on the given `board`.
+
+    Args:
+        board (list[list[Player]]): The board to score.
+
+    Returns:
+        dict: A mapping with keys `black` and `white` and their counts.
+    """
     b = sum(row.count(Player.BLACK) for row in board)
     w = sum(row.count(Player.WHITE) for row in board)
     return {"black": b, "white": w}
 
 def get_valid_moves(board, player):
+    """Compute all valid moves for `player` on `board`.
+
+    Args:
+        board (list[list[Player]]): Current board state.
+        player (Player): The player whose moves to compute.
+
+    Returns:
+        list[list[int]]: List of `[row, col]` valid move coordinates.
+    """
     moves = []
     for r in range(BOARD_SIZE):
         for c in range(BOARD_SIZE):
@@ -34,6 +70,21 @@ def get_valid_moves(board, player):
     return moves
 
 def is_valid_move(board, row, col, player):
+    """Return True if placing `player` at (row, col) is a legal Othello move.
+
+    The function checks all eight directions from the candidate cell looking
+    for at least one contiguous line of opponent stones terminated by a
+    friendly stone.
+
+    Args:
+        board (list[list[Player]]): Current board state.
+        row (int): Row index for the candidate move.
+        col (int): Column index for the candidate move.
+        player (Player): The player making the move.
+
+    Returns:
+        bool: True if the move flips at least one opponent piece.
+    """
     if board[row][col] != Player.NONE:
         return False
     opponent = Player.WHITE if player == Player.BLACK else Player.BLACK
@@ -55,6 +106,22 @@ def is_valid_move(board, row, col, player):
     return False
 
 def apply_move(board, row, col, player):
+    """Apply a move for `player` at `(row, col)` and return updated board.
+
+    This function does not validate the move first; callers should ensure the
+    move is legal (e.g., with `is_valid_move`). It returns both the new board
+    and a list of coordinates that were flipped as a result of the move.
+
+    Args:
+        board (list[list[Player]]): Current board state.
+        row (int): Row index where to place the stone.
+        col (int): Column index where to place the stone.
+        player (Player): Player making the move.
+
+    Returns:
+        tuple: `(new_board, flipped_coords)` where `new_board` is the updated
+               2D board and `flipped_coords` is a list of `[r, c]` pairs.
+    """
     new_board = [row[:] for row in board]
     new_board[row][col] = player
     opponent = Player.WHITE if player == Player.BLACK else Player.BLACK
@@ -78,31 +145,28 @@ def apply_move(board, row, col, player):
             c += dc
     return new_board, flipped_coords
 
-def oldxxx_apply_move(board, row, col, player):
-    new_board = [row[:] for row in board]
-    new_board[row][col] = player
-    opponent = Player.WHITE if player == Player.BLACK else Player.BLACK
-    directions = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
-    for dr, dc in directions:
-        r, c = row + dr, col + dc
-        to_flip = []
-        while 0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE:
-            if new_board[r][c] == opponent:
-                to_flip.append((r, c))
-            elif new_board[r][c] == player:
-                for fr, fc in to_flip:
-                    new_board[fr][fc] = player
-                break
-            else:
-                break
-            r += dr
-            c += dc
-    return new_board
 
 def serialize_board(board):
+    """Convert board `Player` enum values into plain strings for JSON.
+
+    Args:
+        board (list[list[Player]]): Board to serialize.
+
+    Returns:
+        list[list[str]]: 2D list with string values 'BLACK', 'WHITE', or 'NONE'.
+    """
     return [[cell.value for cell in row] for row in board]
 
 def serialize_history(history):
+    """Serialize stored move `history` to JSON-friendly dictionaries.
+
+    Args:
+        history (list[dict]): Internal history list where each entry stores
+                              move metadata and a `boardBefore` snapshot.
+
+    Returns:
+        list[dict]: JSON-serializable history entries.
+    """
     return [
         {
             "player": move["player"].value,
@@ -127,7 +191,11 @@ game_state = {
 
 @app.route('/')
 def index():
-    return render_template('index_v5.html')
+    """Serve the main UI page.
+
+    Returns the rendered `index.html` template consumed by the front-end.
+    """
+    return render_template('index.html')
 
 @app.route('/move', methods=['POST'])
 def move():
@@ -136,35 +204,44 @@ def move():
         data = request.json or {}
         r, c = data.get('row', -99), data.get('col', -99)
 
+        # 1. Check Bounds & Game Over Status
         if (0 <= r < BOARD_SIZE and 0 <= c < BOARD_SIZE) and not game_state['game_over']:
-            board_before = [row[:] for row in game_state['board']]
             
-            # UPDATED: Receive flipped coordinates
-            new_board, flipped = apply_move(game_state['board'], r, c, game_state['current_player'])
-            
-            game_state['board'] = new_board
-            game_state['last_move'] = [r, c]
-            game_state['last_flipped'] = flipped
+            # 2. NEW: Check if move is valid according to Othello rules
+            if is_valid_move(game_state['board'], r, c, game_state['current_player']):
+                
+                board_before = [row[:] for row in game_state['board']]
+                
+                # Receive flipped coordinates
+                new_board, flipped = apply_move(game_state['board'], r, c, game_state['current_player'])
+                
+                game_state['board'] = new_board
+                game_state['last_move'] = [r, c]
+                game_state['last_flipped'] = flipped
 
-            opponent = Player.WHITE if game_state['current_player'] == Player.BLACK else Player.BLACK
-            opponent_moves = get_valid_moves(game_state['board'], opponent)
-            
-            game_state['history'].append({
-                "player": game_state['current_player'],
-                "row": r, "col": c,
-                "timestamp": time.time(),
-                "boardBefore": board_before,
-                "scoreAfter": get_scores(game_state['board']),
-                "nextMovesCount": len(opponent_moves),
-                "last_move": [r, c],       # Save for undo
-                "last_flipped": flipped    # Save for undo
-            })
+                opponent = Player.WHITE if game_state['current_player'] == Player.BLACK else Player.BLACK
+                opponent_moves = get_valid_moves(game_state['board'], opponent)
+                
+                game_state['history'].append({
+                    "player": game_state['current_player'],
+                    "row": r, "col": c,
+                    "timestamp": time.time(),
+                    "boardBefore": board_before,
+                    "scoreAfter": get_scores(game_state['board']),
+                    "nextMovesCount": len(opponent_moves),
+                    "last_move": [r, c],       
+                    "last_flipped": flipped    
+                })
 
-            if opponent_moves:
-                game_state['current_player'] = opponent
+                if opponent_moves:
+                    game_state['current_player'] = opponent
+                else:
+                    if not get_valid_moves(game_state['board'], game_state['current_player']):
+                        game_state['game_over'] = True
+            
+            # log an "Invalid Move Attempt"
             else:
-                if not get_valid_moves(game_state['board'], game_state['current_player']):
-                    game_state['game_over'] = True
+                print(f"Invalid move attempted at {r}, {c}")
 
         return jsonify(get_response_data())
     except Exception as e:
@@ -173,6 +250,12 @@ def move():
 @app.route('/undo', methods=['POST'])
 def undo():
     global game_state
+    """Undo the last move and return the resulting game state.
+
+    The undo operation restores the most recent history snapshot where
+    possible; if no history remains the board is reset to the initial
+    configuration.
+    """
     if game_state['history']:
         game_state['history'].pop()
         if game_state['history']:
@@ -196,6 +279,11 @@ def undo():
     return jsonify(get_response_data())
 
 def get_response_data():
+    """Build a JSON-serializable snapshot of the current `game_state`.
+
+    Returns a dictionary ready for `jsonify` containing board, player,
+    valid moves, history, scores and some convenience fields used by the UI.
+    """
     return {
         "board": serialize_board(game_state['board']),
         "current_player": game_state['current_player'].value,
@@ -209,6 +297,10 @@ def get_response_data():
 
 # --- Updated Global State Initialization ---
 def get_initial_state():
+    """Return a fresh initial `game_state` dictionary.
+
+    Useful for resetting the engine or initializing at startup.
+    """
     return {
         "board": create_initial_board(),
         "current_player": Player.BLACK,
@@ -224,6 +316,10 @@ game_state = get_initial_state()
 @app.route('/reset', methods=['POST'])
 def reset():
     global game_state
+    """Reset the server-side game state to the initial configuration.
+
+    Returns the fresh state as JSON for immediate UI consumption.
+    """
     print("Resetting Game Engine")
     game_state = get_initial_state()
     # After resetting, we return the fresh state directly to the UI
@@ -231,6 +327,12 @@ def reset():
 
 # --- Updated Response Helper ---
 def get_response_data():
+    """Compatibility wrapper returning a safe snapshot of `game_state`.
+
+    This secondary definition uses `.get()` to avoid KeyError when older
+    consumers or partial states are present; it mirrors the primary
+    `get_response_data` implementation but is defensive.
+    """
     return {
         "board": serialize_board(game_state['board']),
         "current_player": game_state['current_player'].value,
