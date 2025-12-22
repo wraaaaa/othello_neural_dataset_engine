@@ -1,3 +1,12 @@
+"""Simple Othello game engine HTTP server.
+
+This module provides a lightweight Flask-based API for an Othello/Reversi
+engine used by the front-end UI in `templates/index.html`. It exposes routes
+to query the board, make moves, undo, and reset the game. Utility functions
+implement the core game logic (valid move detection, applying moves, scoring)
+and small helpers to serialize internal state for JSON responses.
+"""
+
 from flask import Flask, render_template, jsonify, request
 import time
 from enum import Enum
@@ -10,8 +19,18 @@ class Player(Enum):
     BLACK = "BLACK"
     WHITE = "WHITE"
     NONE = "NONE"
+    """Enumeration of possible board cell states.
+
+    - `BLACK` and `WHITE` represent player stones.
+    - `NONE` represents an empty board cell.
+    """
 
 def create_initial_board():
+    """Create and return the standard 8x8 Othello starting board.
+
+    Returns:
+        list[list[Player]]: A 2D list representing the initial board state.
+    """
     board = [[Player.NONE for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
     mid = BOARD_SIZE // 2
     board[mid-1][mid-1] = Player.WHITE
@@ -21,11 +40,28 @@ def create_initial_board():
     return board
 
 def get_scores(board):
+    """Count stones for each player on the given `board`.
+
+    Args:
+        board (list[list[Player]]): The board to score.
+
+    Returns:
+        dict: A mapping with keys `black` and `white` and their counts.
+    """
     b = sum(row.count(Player.BLACK) for row in board)
     w = sum(row.count(Player.WHITE) for row in board)
     return {"black": b, "white": w}
 
 def get_valid_moves(board, player):
+    """Compute all valid moves for `player` on `board`.
+
+    Args:
+        board (list[list[Player]]): Current board state.
+        player (Player): The player whose moves to compute.
+
+    Returns:
+        list[list[int]]: List of `[row, col]` valid move coordinates.
+    """
     moves = []
     for r in range(BOARD_SIZE):
         for c in range(BOARD_SIZE):
@@ -34,6 +70,21 @@ def get_valid_moves(board, player):
     return moves
 
 def is_valid_move(board, row, col, player):
+    """Return True if placing `player` at (row, col) is a legal Othello move.
+
+    The function checks all eight directions from the candidate cell looking
+    for at least one contiguous line of opponent stones terminated by a
+    friendly stone.
+
+    Args:
+        board (list[list[Player]]): Current board state.
+        row (int): Row index for the candidate move.
+        col (int): Column index for the candidate move.
+        player (Player): The player making the move.
+
+    Returns:
+        bool: True if the move flips at least one opponent piece.
+    """
     if board[row][col] != Player.NONE:
         return False
     opponent = Player.WHITE if player == Player.BLACK else Player.BLACK
@@ -55,6 +106,22 @@ def is_valid_move(board, row, col, player):
     return False
 
 def apply_move(board, row, col, player):
+    """Apply a move for `player` at `(row, col)` and return updated board.
+
+    This function does not validate the move first; callers should ensure the
+    move is legal (e.g., with `is_valid_move`). It returns both the new board
+    and a list of coordinates that were flipped as a result of the move.
+
+    Args:
+        board (list[list[Player]]): Current board state.
+        row (int): Row index where to place the stone.
+        col (int): Column index where to place the stone.
+        player (Player): Player making the move.
+
+    Returns:
+        tuple: `(new_board, flipped_coords)` where `new_board` is the updated
+               2D board and `flipped_coords` is a list of `[r, c]` pairs.
+    """
     new_board = [row[:] for row in board]
     new_board[row][col] = player
     opponent = Player.WHITE if player == Player.BLACK else Player.BLACK
@@ -80,9 +147,26 @@ def apply_move(board, row, col, player):
 
 
 def serialize_board(board):
+    """Convert board `Player` enum values into plain strings for JSON.
+
+    Args:
+        board (list[list[Player]]): Board to serialize.
+
+    Returns:
+        list[list[str]]: 2D list with string values 'BLACK', 'WHITE', or 'NONE'.
+    """
     return [[cell.value for cell in row] for row in board]
 
 def serialize_history(history):
+    """Serialize stored move `history` to JSON-friendly dictionaries.
+
+    Args:
+        history (list[dict]): Internal history list where each entry stores
+                              move metadata and a `boardBefore` snapshot.
+
+    Returns:
+        list[dict]: JSON-serializable history entries.
+    """
     return [
         {
             "player": move["player"].value,
@@ -107,6 +191,10 @@ game_state = {
 
 @app.route('/')
 def index():
+    """Serve the main UI page.
+
+    Returns the rendered `index.html` template consumed by the front-end.
+    """
     return render_template('index.html')
 
 @app.route('/move', methods=['POST'])
@@ -162,6 +250,12 @@ def move():
 @app.route('/undo', methods=['POST'])
 def undo():
     global game_state
+    """Undo the last move and return the resulting game state.
+
+    The undo operation restores the most recent history snapshot where
+    possible; if no history remains the board is reset to the initial
+    configuration.
+    """
     if game_state['history']:
         game_state['history'].pop()
         if game_state['history']:
@@ -185,6 +279,11 @@ def undo():
     return jsonify(get_response_data())
 
 def get_response_data():
+    """Build a JSON-serializable snapshot of the current `game_state`.
+
+    Returns a dictionary ready for `jsonify` containing board, player,
+    valid moves, history, scores and some convenience fields used by the UI.
+    """
     return {
         "board": serialize_board(game_state['board']),
         "current_player": game_state['current_player'].value,
@@ -198,6 +297,10 @@ def get_response_data():
 
 # --- Updated Global State Initialization ---
 def get_initial_state():
+    """Return a fresh initial `game_state` dictionary.
+
+    Useful for resetting the engine or initializing at startup.
+    """
     return {
         "board": create_initial_board(),
         "current_player": Player.BLACK,
@@ -213,6 +316,10 @@ game_state = get_initial_state()
 @app.route('/reset', methods=['POST'])
 def reset():
     global game_state
+    """Reset the server-side game state to the initial configuration.
+
+    Returns the fresh state as JSON for immediate UI consumption.
+    """
     print("Resetting Game Engine")
     game_state = get_initial_state()
     # After resetting, we return the fresh state directly to the UI
@@ -220,6 +327,12 @@ def reset():
 
 # --- Updated Response Helper ---
 def get_response_data():
+    """Compatibility wrapper returning a safe snapshot of `game_state`.
+
+    This secondary definition uses `.get()` to avoid KeyError when older
+    consumers or partial states are present; it mirrors the primary
+    `get_response_data` implementation but is defensive.
+    """
     return {
         "board": serialize_board(game_state['board']),
         "current_player": game_state['current_player'].value,
