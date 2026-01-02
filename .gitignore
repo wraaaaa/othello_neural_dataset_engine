@@ -10,6 +10,7 @@ wheels/
 .venv/
 
 # Dataset Engine Exports
+game_exports/
 othello_dataset_*.json
 
 # UV & Local Environment
@@ -18,3 +19,4 @@ othello_dataset_*.json
 # IDE/System files
 .vscode/
 .DS_Store
+AGENTS.md
