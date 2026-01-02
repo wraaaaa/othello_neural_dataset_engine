@@ -2,6 +2,8 @@
 
 Lightweight Flask web engine and terminal runner for generating ML-ready Othello (Reversi) gameplay data.
 
+![Othello Game Preview](docs/image01_board.png)
+
 This repository contains:
 
 - `main.py` — Flask web server and frontend integration. Exposes API endpoints used by the browser UI and manages per-session game instances.
