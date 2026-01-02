@@ -6,15 +6,26 @@ dist/
 wheels/
 *.egg-info
 
+
 # Virtual environments
 .venv/
 
 # Dataset Engine Exports
-othello_dataset_*.json
+game_exports/
 
 # UV & Local Environment
 .python-version
+.ruff_cache/
+.env
 
 # IDE/System files
 .vscode/
 .DS_Store
+AGENTS.md
+
+## backup files
+*bck*
+
+
+# log files
+*.log

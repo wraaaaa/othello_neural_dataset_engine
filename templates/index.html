@@ -54,20 +54,14 @@
             pointer-events: none;
             font-family: monospace;
         }
-		
-		/* Last piece placed: Dark Blue */
-		.last-move-highlight {
-			background-color: #1e3a8a !important; /* Blue-900 */
-			box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
-		}
-		
-		/* Swapped pieces: Light Blue */
-		.flipped-highlight {
-			background-color: #3b82f6 !important; /* Blue-500 */
-			transition: background-color 0.8s ease;
-		}
-        
-        /* Animation for auto-play active */
+        .last-move-highlight {
+            background-color: #1e3a8a !important;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+        }
+        .flipped-highlight {
+            background-color: #3b82f6 !important;
+            transition: background-color 0.8s ease;
+        }
         .pulse-ring {
             box-shadow: 0 0 0 0 rgba(147, 51, 234, 0.7);
             animation: pulse-purple 2s infinite;
@@ -141,13 +135,17 @@
 
     <script>
         console.log("Script loaded. Connecting...");
-        
-        // --- API Calls ---
 
+        // --- Global State ---
+        let historyCache = [];
+        let isAutoPlaying = false;
+        let autoPlayTimer = null;
+
+        // --- API Calls ---
         async function api(row, col) {
-            stopAutoPlay(); // Stop bot if human interferes
-            const statusEl = document.getElementById('status-msg');
+            stopAutoPlay();
             try {
+                // Initialize request. -1, -1 is a dummy move to get state
                 const response = await fetch('/move', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -158,6 +156,7 @@
                 render(data);
             } catch (err) {
                 console.error("API Error:", err);
+                document.getElementById('status-msg').innerText = "CONNECTION ERROR";
             }
         }
 
@@ -167,7 +166,7 @@
                 if (!response.ok) throw new Error("Bot Move Failed");
                 const data = await response.json();
                 render(data);
-                return data; // Return data for auto-play chaining
+                return data;
             } catch (err) {
                 console.error("Bot Error:", err);
             }
@@ -189,21 +188,13 @@
                 const response = await fetch('/reset', { method: 'POST' });
                 const data = await response.json();
                 render(data);
-                console.log("Engine Reset Successful");
             } catch (err) { console.error(err); }
         }
         
         // --- Auto Play Logic ---
-        
-        let isAutoPlaying = false;
-        let autoPlayTimer = null;
-
         function toggleAutoPlay() {
-            if (isAutoPlaying) {
-                stopAutoPlay();
-            } else {
-                startAutoPlay();
-            }
+            if (isAutoPlaying) stopAutoPlay();
+            else startAutoPlay();
         }
 
         function startAutoPlay() {
@@ -226,95 +217,124 @@
 
         async function runAutoPlayLoop() {
             if (!isAutoPlaying) return;
-            
-            // Execute bot move
             const data = await triggerBotMove();
-            
-            // Check termination
             if (data && !data.game_over && isAutoPlaying) {
-                // Add slight delay for visual pleasure
-                autoPlayTimer = setTimeout(runAutoPlayLoop, 150); 
+                autoPlayTimer = setTimeout(runAutoPlayLoop, 150);
             } else if (data && data.game_over) {
                 stopAutoPlay();
             }
         }
 
-        // --- Rendering ---
-
-        let historyCache = [];
-
-		function render(data) {
+        // --- Main Render Function ---
+        function render(data) {
             try {
-                if (!data || !Array.isArray(data.board)) return;
+                if (!data || !Array.isArray(data.board)) {
+                    console.error("Invalid data received:", data);
+                    return;
+                }
 
-                historyCache = data.history;
-				const board = document.getElementById('board');
-				board.innerHTML = '';
+                historyCache = data.history || [];
+                const board = document.getElementById('board');
+                board.innerHTML = '';
 
-				data.board.forEach((row, r) => {
-					row.forEach((cell, c) => {
-						const cellDiv = document.createElement('div');
-						
-						const isValid = data.valid_moves.some(m => m[0] === r && m[1] === c);
-						const isLastMove = data.last_move && data.last_move[0] === r && data.last_move[1] === c;
-						const isFlipped = data.last_flipped && data.last_flipped.some(m => m[0] === r && m[1] === c);
+                // 1. RENDER BOARD
+                data.board.forEach((row, r) => {
+                    row.forEach((cell, c) => {
+                        const cellDiv = document.createElement('div');
+                        
+                        // Safety checks for arrays
+                        const isValid = data.valid_moves && data.valid_moves.some(m => m[0] === r && m[1] === c);
+                        const isLastMove = data.last_move && data.last_move[0] === r && data.last_move[1] === c;
+                        const isFlipped = data.last_flipped && data.last_flipped.some(m => m[0] === r && m[1] === c);
 
-						let classes = 'board-cell';
-						if (isValid && !data.game_over && !isAutoPlaying) classes += ' valid-move-active';
-						
-						if (isLastMove) classes += ' last-move-highlight';
-						else if (isFlipped) classes += ' flipped-highlight';
-						
-						cellDiv.className = classes;
+                        let classes = 'board-cell';
+                        if (isValid && !data.game_over && !isAutoPlaying) classes += ' valid-move-active';
+                        
+                        if (isLastMove) classes += ' last-move-highlight';
+                        else if (isFlipped) classes += ' flipped-highlight';
+                        
+                        cellDiv.className = classes;
 
-						// Coordinates
-						if (c === 0) {
-                            const rowLabel = document.createElement('span');
-                            rowLabel.className = 'coord-label';
-                            rowLabel.style.left = '4px';
-                            rowLabel.style.top = '2px';
-                            rowLabel.innerText = r + 1;
-                            cellDiv.appendChild(rowLabel);
+                        // Coord Labels
+                        if (c === 0) {
+                            const lbl = document.createElement('span');
+                            lbl.className = 'coord-label';
+                            lbl.style.left = '4px'; lbl.style.top = '2px';
+                            lbl.innerText = r + 1;
+                            cellDiv.appendChild(lbl);
                         }
                         if (r === 0) {
-                            const colLabel = document.createElement('span');
-                            colLabel.className = 'coord-label';
-                            colLabel.style.right = '4px';
-                            colLabel.style.top = '2px';
-                            colLabel.innerText = String.fromCharCode(65 + c);
-                            cellDiv.appendChild(colLabel);
+                            const lbl = document.createElement('span');
+                            lbl.className = 'coord-label';
+                            lbl.style.right = '4px'; lbl.style.top = '2px';
+                            lbl.innerText = String.fromCharCode(65 + c);
+                            cellDiv.appendChild(lbl);
                         }
 
+                        // Pieces / Hints
                         if (cell !== 'NONE') {
                             const piece = document.createElement('div');
                             piece.className = `piece ${cell}`;
                             cellDiv.appendChild(piece);
                         } else if (isValid && !data.game_over && !isAutoPlaying) {
-                            // Only show hints if not auto-playing
                             const hint = document.createElement('div');
                             hint.className = 'valid-hint';
                             cellDiv.appendChild(hint);
                             cellDiv.onclick = () => api(r, c);
                         }
 
-						board.appendChild(cellDiv);
-					});
-				});
-
-                document.getElementById('black-score').innerText = data.scores.black;
-                document.getElementById('white-score').innerText = data.scores.white;
-                document.getElementById('status-msg').innerText = data.game_over ? "GAME OVER" : `${data.current_player}'S TURN`;
-
-                ['BLACK', 'WHITE'].forEach(p => {
-                    const card = document.getElementById(`card-${p}`);
-                    card.style.borderColor = (data.current_player === p && !data.game_over) ? '#3b82f6' : 'transparent';
+                        board.appendChild(cellDiv);
+                    });
                 });
 
+                // 2. UPDATE SCORES & COLORS
+                const blackScore = data.scores ? data.scores.black : 0;
+                const whiteScore = data.scores ? data.scores.white : 0;
+                
+                const blackEl = document.getElementById('black-score');
+                const whiteEl = document.getElementById('white-score');
+
+                if (blackEl && whiteEl) {
+                    blackEl.innerText = blackScore;
+                    whiteEl.innerText = whiteScore;
+
+                    // Reset Classes
+                    const baseClass = "text-2xl font-black transition-colors duration-300";
+                    blackEl.className = baseClass;
+                    whiteEl.className = baseClass;
+
+                    // Apply Green/White Logic
+                    if (blackScore > whiteScore) {
+                        blackEl.classList.add('text-green-400');
+                        whiteEl.classList.add('text-white');
+                    } else if (whiteScore > blackScore) {
+                        whiteEl.classList.add('text-green-400');
+                        blackEl.classList.add('text-white');
+                    } else {
+                        blackEl.classList.add('text-white');
+                        whiteEl.classList.add('text-white');
+                    }
+                }
+
+                // 3. UPDATE UI STATUS
+                const statusEl = document.getElementById('status-msg');
+                if (statusEl) {
+                    statusEl.innerText = data.game_over ? "GAME OVER" : `${data.current_player}'S TURN`;
+                }
+                
+                ['BLACK', 'WHITE'].forEach(p => {
+                    const card = document.getElementById(`card-${p}`);
+                    if (card) {
+                        card.style.borderColor = (data.current_player === p && !data.game_over) ? '#3b82f6' : 'transparent';
+                    }
+                });
+
+                // 4. LOG & GAME OVER BANNER
                 let gameOverHTML = '';
                 if (data.game_over) {
                     let resultText = "DRAW";
-                    if (data.scores.black > data.scores.white) resultText = "BLACK WINS";
-                    else if (data.scores.white > data.scores.black) resultText = "WHITE WINS";
+                    if (blackScore > whiteScore) resultText = "BLACK WINS";
+                    else if (whiteScore > blackScore) resultText = "WHITE WINS";
                     
                     gameOverHTML = `
                         <div class="bg-gradient-to-r from-red-900 to-red-800 border border-red-500/50 p-3 rounded mb-3 text-center shadow-lg animate-pulse">
@@ -323,20 +343,22 @@
                     `;
                 }
 
-                const logHTML = data.history.slice().reverse().map(m => `
-                    <div class="p-2 border-b border-slate-800/50 flex justify-between items-center hover:bg-slate-800/30 transition-colors">
-                        <div class="flex items-center gap-3">
-                            <span class="${m.player === 'BLACK' ? 'text-zinc-400' : 'text-slate-100'} font-bold w-12 text-[10px]">${m.player}</span>
-                            <span class="font-mono text-blue-300 font-bold">${String.fromCharCode(65 + m.col)}${m.row + 1}</span>
+                const logEl = document.getElementById('log');
+                if (logEl) {
+                    const logHTML = (data.history || []).slice().reverse().map(m => `
+                        <div class="p-2 border-b border-slate-800/50 flex justify-between items-center hover:bg-slate-800/30 transition-colors">
+                            <div class="flex items-center gap-3">
+                                <span class="${m.player === 'BLACK' ? 'text-zinc-400' : 'text-slate-100'} font-bold w-12 text-[10px]">${m.player}</span>
+                                <span class="font-mono text-blue-300 font-bold">${String.fromCharCode(65 + m.col)}${m.row + 1}</span>
+                            </div>
+                            <div class="flex items-center gap-3 text-[9px] opacity-70">
+                                <span class="text-slate-500" title="Moves available for next player">Next: <span class="text-slate-300">${m.nextMovesCount}</span></span>
+                                <span class="font-mono bg-black/20 px-1.5 py-0.5 rounded text-slate-400">B:${m.scoreAfter.black} W:${m.scoreAfter.white}</span>
+                            </div>
                         </div>
-                        <div class="flex items-center gap-3 text-[9px] opacity-70">
-                            <span class="text-slate-500" title="Moves available for next player">Next: <span class="text-slate-300">${m.nextMovesCount}</span></span>
-                            <span class="font-mono bg-black/20 px-1.5 py-0.5 rounded text-slate-400">B:${m.scoreAfter.black} W:${m.scoreAfter.white}</span>
-                        </div>
-                    </div>
-                `).join('');
-
-                document.getElementById('log').innerHTML = gameOverHTML + logHTML;
+                    `).join('');
+                    logEl.innerHTML = gameOverHTML + logHTML;
+                }
 
             } catch (e) {
                 console.error("Render error:", e);
@@ -344,16 +366,14 @@
         }
 
         function exportJSON() {
-            if (historyCache.length === 0) return alert("No moves to export.");
-            const blob = new Blob([JSON.stringify(historyCache, null, 2)], {type: 'application/json'});
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `othello_dataset_${Date.now()}.json`;
-            a.click();
+            window.location.href = '/export';
         }
 
-        // Initialize board
-        api(-1, -1);
+        // Init
+        window.onload = () => {
+            // Send dummy -1,-1 to initialize board state
+            api(-1, -1);
+        };
     </script>
 </body>
 </html>

@@ -1,3 +1,102 @@
+## Othello Pro — Neural Dataset Engine
+
+Lightweight Flask web engine and terminal runner for generating ML-ready Othello (Reversi) gameplay data.
+
+This repository contains:
+
+- `main.py` — Flask web server and frontend integration. Exposes API endpoints used by the browser UI and manages per-session game instances.
+- `othello.py` — Core `OthelloGame` class: game rules, validation, history snapshots, CSV export, and a small rich terminal renderer.
+- `othello_terminal.py` — Terminal autoplay runner that plays a full game and writes a CSV export.
+- `templates/index.html` — Tailwind-based frontend that interacts with the Flask API and renders the 8x8 board.
+
+Key design points:
+
+- Each move is recorded with a rich snapshot (board state, positional features, pre/post scores, mobility, etc.) suitable for ML training.
+- Web sessions are tracked in a server-side `GAMES` dict keyed by `session['user_id']` (see `main.py`).
+- On game end, the engine auto-exports CSV history into the configured `GAME_EXPORT_DIR`.
+
+---
+
+## Quickstart — Web
+
+1. Create and activate a Python environment and install dependencies (the project uses `uv` for package management; `flask`, `pandas`, and `python-dotenv` are required).
+
+2. Optionally create a `.env` file to override defaults (see Environment Variables below).
+
+3. Run the web server:
+
+```bash
+python main.py
+```
+
+Open http://127.0.0.1:5001/ to load the frontend.
+
+Important API endpoints (used by the frontend):
+
+- `GET /` — Serves `templates/index.html`.
+- `POST /move` — Apply a move. Sending `{ row: -1, col: -1 }` returns current state without changing the board.
+- `POST /bot-move` — Engine plays a single automated move.
+- `POST /undo` — Undo last move.
+- `POST /reset` — Reset board to initial position.
+- `GET /export` — Stream CSV export of current game history.
+
+---
+
+## Quickstart — Terminal Autoplay
+
+Run the terminal runner to auto-play a game and export its history:
+
+```bash
+python othello_terminal.py
+```
+
+This writes a CSV into the configured export directory when the game finishes.
+
+---
+
+## Environment Variables
+
+Set these in a `.env` file to customize behavior (defaults shown):
+
+- `GAME_EXPORT_DIR` — `game_exports/` (where CSVs are saved)
+- `WEB_EXPORT_PREFIX` — `othello_web_game_`
+- `TERMINAL_EXPORT_PREFIX` — `othello_terminal_data_`
+- `FLASK_PORT` — `5001`
+- `FLASK_DEBUG` — `True` or `False`
+
+---
+
+## Exports & Dataset
+
+- `OthelloGame.history` is a list of rich move records. Use `/export` or `OthelloGame.export_csv()` to create CSVs suitable for ML ingestion.
+- Default export location: `game_exports/` with configured filename prefixes.
+
+---
+
+## Development / Quality
+
+Follow repository conventions before committing changes:
+
+- Install dependencies with your environment tool (`uv sync` as per project conventions).
+- Lint: `ruff check .`
+- Format: `black --check .` (use `black .` to fix)
+- Type-check: `mypy .`
+- Tests: `pytest`
+
+---
+
+## Files of interest
+
+- [main.py](main.py)
+- [othello.py](othello.py)
+- [othello_terminal.py](othello_terminal.py)
+- [templates/index.html](templates/index.html)
+
+---
+
+If you want, I can add a CONTRIBUTING section, create a `requirements.txt`, or run the project checks and tests.
+
+License: see `LICENSE` in the repo root.
 # Othello Pro: Neural Dataset Engine
 
 ⚠️ **PROJECT STATUS: UNDER CONSTRUCTION**
